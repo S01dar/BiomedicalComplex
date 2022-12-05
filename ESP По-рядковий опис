@@ -1,0 +1,131 @@
+// Ініціалізація бібліотек.
+// *** Передбачається, що використовується прошивка Node MCU для ESP8266, а також доступний накопичувач SPIFFS.
+// *** Необхідно встановити ESP8266 Filesystem Uploader.
+// *** Також, необхідно встановити бібліотеки ESP плат, доступні за посиланням http://arduino.esp8266.com/stable/package_esp8266com_index.json.
+// Завантажуємо бібліотеку для підключення ESP8266 до Wi-Fi роутера.
+#include <ESP8266WiFi.h>
+// Завантажуємо бібліотеку для отримання функцій асинхронного багатоклієнтного TCP-сервера.
+#include <ESPAsyncTCP.h>
+// Завантажуємо бібліотеку для фиористання функцій необхідних для створення асинхронного WEB-сервера.
+#include <ESPAsyncWebServer.h>
+// Завантажуємо бібліотеку для фиористання функцій необхідних для створення асинхронного WEB-сервера.
+#include <FS.h>
+// Завантажуємо бібліотеку для роботи з пристроями по  I2C / TWI інтерфейсам.
+#include "GParser.h"
+// Підключаємо бібліотеку для розбиття даних отриманих СОМ-портом на складові.
+// *** Бібліотеку можна завантажити в менеджері.
+String ledState, Measure1, Measure2, Measure3, Measure4, Measure5;
+// Визначаємо текстові дані, що виводитимуться до інтерфейсу сервера.
+int ledStateInt = 0;
+// Визначаємо числове значення, що індикує включення чи включення світлодіода керованого Arduino UNO.
+boolean SerialReadFlag = true;
+// Встановлюємо назву WiFi-точки доступу, до якої потрібно під'єднатися.
+const char* ssid = "SSID";
+// Заповнюємо пароль WiFi-точки доступу, до якої потрібно під'єднатися.
+const char* password = "Password1111";
+// Створюємо об'єкт типу AsyncWebServer, що отримує дані з порту 80.
+AsyncWebServer server(80);
+// Визначаємо функцію для отримання даних від Arduino UNO.
+void GetMeasure() {
+  // Надсилаємо код до Arduino UNO, для отримання данних з датчиків.
+  Serial.println("101;");
+  // Затримка очікування даних 10 мс.
+  delay(10);
+  // Отримуємо кількість байт символів доступних для читання з послідовного інтерфейсу.
+  // *** Є можливість збільшити швидкість читання за рахунок використання асинхронної бібліотеки.  
+  if (Serial.available() > 0){
+    // Визначаємо буфера str, як char масив з 70 алфавітно-цифрових символів.
+    char str[70];
+    // Зчитуємо байти з буфера послідовного з'єднання до розділового знаку ";".
+    // Інформацію поміщуємо у буфер str з максимальною ємністю у 70 символів.
+    // Записуємо інформацію до буфера amount.    
+    int amount = Serial.readBytesUntil(';', str, 70);
+    // Усю інформацію, що не відповідає розміру буфера amount та знаходиться після ";" не читаємо.
+    str[amount] = NULL;
+    // Використовуємо бібліотеку "GParser.h", яка підготовлює рядок str до поділу на підрядки за розділовим знаком ','.
+    GParser data(str, ',');
+    // Розбиваємо рядок на підрядки.
+    int am = data.split();
+    // За допомогою буфера am отримуємо з String даних Int дані.
+    int DataPrint = data.getInt(0);
+    // Визначаємо у ролі ключа значення з 0 підрядока.
+    switch (DataPrint){
+      // Визначаємо значення ключі що більше 100 у ролі вхідних команд для Arduino UNO.
+      // За ключем 10 надходять дані від Arduino UNO про показання датчика 1 - 5.
+      case 10: 
+          // Перевіряємо чи наявні усі дані у посилці.
+          if (am < 6){
+            return;
+          }
+          // Якщо отримані 6 підрядків, то записуємо дані у глобальні змінні.
+          else{
+            // Подвійне перетворення, передбачається, що у подальшому будуть виконуватися розрахунки з перетвореними числами.
+            Measure1 = String(data.getFloat(1));
+            Measure2 = String(data.getInt(2));
+            Measure3 = String(data.getFloat(3));
+            Measure4 = String(data.getFloat(4));
+            Measure5 = String(data.getFloat(5));
+            // Тестове повідомлення.
+            Serial.println(Measure1 + Measure2 + Measure3 + Measure4 + Measure5);        
+          }
+        break;
+    }
+  }
+  // Якщо даних у послідовному порті немає, функція повторюється.
+  else if (Serial.available() == 0){
+  return;
+  }
+}
+// Встановлюємо налаштування.
+void setup(){
+  // Швидкість обміну за послідовним портом 115200 бод.
+  Serial.begin(115200);
+  // Здійснюємо ініціалізацію файлової системи SPIFFS.
+  if(!SPIFFS.begin()){
+    // Виводимо повідомлення, якщо сталася помилка у роботі файлової системи.
+    Serial.println("Сталася помилка при монтуванні SPIFFS");
+    return;
+  }
+  // Під'єднуємося до Wi-Fi роуте з заданими назвою та паролем.
+  WiFi.begin(ssid, password);
+  // Виконуємо код поки ESP8266 під'єд до Wi-Fi роутера.
+  while (WiFi.status() != WL_CONNECTED) {
+    // Встановлюємо затримку у 1 с.
+    delay(1000);
+    // Виводимо повідомлення,у послідовний порт, про процес підключення до Wi-Fi.
+    Serial.println("Підключення до Wi-Fi...");
+  }
+  // Виводимо повідомлення,у послідовний порт, про надану локальну IP адресу.
+  Serial.println(WiFi.localIP());
+  // За допомогою бібліотеки ESPAsyncWebServer налаштовуємо маршрути, за яким сервер прослуховуватиме HTTP-запити.
+  // Отримавши запит, сервер виконуватиме функції при отриманні запита на цьому маршруті.
+  // Коли сервер отримує запит по адресі "/", він надсилає клієнту index.html.
+  // Останній заповнювач повідомляє про стан світлодіода.  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(SPIFFS, "/index.html");
+  });
+  // Оновлення даних на сторінці.
+  server.on("/device1", HTTP_GET, [](AsyncWebServerRequest *request){
+    // У файлі index.html написаний JavaScript код, який робить запит показників кожні 500 мс
+    request->send_P(200, "text/plain", Measure1.c_str());
+  });
+  server.on("/device2", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", Measure2.c_str());
+  });
+  server.on("/device3", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", Measure3.c_str());
+  });  
+  server.on("/device4", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", Measure4.c_str());
+  }); 
+  server.on("/device5", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", Measure5.c_str());
+  });
+  // Запуск сервера.   
+  server.begin();
+}
+ 
+void loop(){
+  // Періодичне виконання функції отримання даних з Arduino.
+  GetMeasure();
+}
